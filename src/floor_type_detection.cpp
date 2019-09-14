@@ -24,8 +24,9 @@ std::ostream &operator<<(std::ostream &o, std::vector<T> data) {
   return o;
 }
 
-std::vector<double> getCSV(const std::string &file, char delimiter) {
-  std::vector<double> data;
+std::vector<dlib::matrix<double>> getCSV(const std::string &file,
+                                         char delimiter) {
+  std::vector<dlib::matrix<double>> data;
   std::string line, value1, value2;
   std::ifstream f(file, std::ios::in);
   if (!f) {
@@ -35,11 +36,18 @@ std::vector<double> getCSV(const std::string &file, char delimiter) {
   std::cout << "reading CSV file " << file << std::endl;
   bool first = true;
   while (getline(f, line)) {
-    auto elements = split(line, delimiter);
     if (first) {
-      std::cout << elements << std::endl;
       first = false;
+      continue;
     }
+    auto elements = split(line, delimiter);
+    std::cout << elements << std::endl;
+    dlib::matrix<double> line_data(1, elements.size());
+    std::for_each(
+        elements.cbegin(), elements.cend(),
+        [i = 0, &line_data](auto &e) mutable { line_data(0, i) = stod(e); });
+    // std::cout << line_data << std::endl;
+    data.push_back(line_data);
   }
   std::cout << "Opened CSV file with " << data.size() << " lines." << std::endl;
   return data;
