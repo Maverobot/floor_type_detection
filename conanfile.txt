@@ -1,5 +1,5 @@
 [requires]
-mlpack/3.1.0@darcamo/stable
+mlpack/3.0.4@darcamo/stable
 
 [generators]
 cmake
