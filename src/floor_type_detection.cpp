@@ -17,8 +17,9 @@ using mlpack::ann::SigmoidLayer;
 using mlpack::optimization::Adam;
 using mlpack::optimization::RMSProp;
 
-std::tuple<arma::mat, arma::mat>
-getTrainingData(double i_max = 100000, double x_min = -5, double x_max = 5) {
+std::tuple<arma::mat, arma::mat> getTrainingData(double i_max = 100000,
+                                                 double x_min = -M_PI,
+                                                 double x_max = M_PI) {
   arma::mat x(i_max, 1);
   arma::mat y(i_max, 1);
 
@@ -31,6 +32,8 @@ getTrainingData(double i_max = 100000, double x_min = -5, double x_max = 5) {
 
   return std::make_tuple(x, y);
 };
+
+using mlpack::math::ShuffleData;
 
 int main(int argc, char *argv[]) {
 
@@ -46,34 +49,41 @@ int main(int argc, char *argv[]) {
               OptimizerType & optimizer);
   */
 
+  arma::mat train_x_original;
+  arma::mat train_y_original;
+
+  std::tie(train_x_original, train_y_original) = getTrainingData();
+  std::cout << "training data size: " << train_x_original.size() << std::endl;
+  // std::cout << "training x: " << std::endl << train_x_original << std::endl;
+  // std::cout << "training y: " << std::endl << train_y_original << std::endl;
+
   arma::mat train_x;
   arma::mat train_y;
+  ShuffleData(train_x_original, train_y_original, train_x, train_y);
 
-  std::tie(train_x, train_y) = getTrainingData(std::stod(argv[1]));
-  std::cout << "training data size: " << train_x.size() << std::endl;
-  // std::cout << "training x: " << std::endl << train_x << std::endl;
-  // std::cout << "training y: " << std::endl << train_y << std::endl;
+  arma::cube c;
 
   FFN<MeanSquaredError<>> model;
   model.Add<Linear<>>(1, 10);
   model.Add<ReLULayer<>>();
-  model.Add<Linear<>>(10, 40);
+  model.Add<Linear<>>(100, 100);
   model.Add<ReLULayer<>>();
-  model.Add<Linear<>>(40, 40);
+  model.Add<Linear<>>(10, 10);
   model.Add<ReLULayer<>>();
-  model.Add<Linear<>>(40, 1);
+  model.Add<Linear<>>(10, 1);
   model.ResetParameters();
 
-  RMSProp opt(0.01, 64, 0.99, 1e-8, 1000000, 1e-5, true);
+  arma::mat test_x(1, 1);
+  arma::mat test_y(1, 1);
+  RMSProp opt(0.01, 32, 0.99, 1e-8, std::stod(argv[1]), 1e-5, false);
   model.Train(train_x, train_y, opt);
 
-  arma::mat test_x(1, 1);
-  test_x.at(0) = std::stod(argv[2]);
-  arma::mat test_y(1, 1);
-  model.Predict(test_x, test_y);
-
-  std::cout << "predicted: " << test_y << "real: " << std::cos(test_x(0))
-            << std::endl;
+  size_t i = 0;
+  arma::mat assignments(train_x.size(), 1);
+  std::cout << "Predicting..." << std::endl;
+  model.Predict(train_x, assignments);
+  std::cout << "x: " << train_x.head_rows(10) << std::endl;
+  std::cout << "f(x): " << assignments.head_rows(10) << std::endl;
 
   return 0;
 }
