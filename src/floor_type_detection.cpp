@@ -25,7 +25,7 @@ std::ostream &operator<<(std::ostream &o, std::vector<T> data) {
 }
 
 std::vector<dlib::matrix<double>> getCSV(const std::string &file,
-                                         char delimiter) {
+                                         char delimiter = ',') {
   std::vector<dlib::matrix<double>> data;
   std::string line, value1, value2;
   std::ifstream f(file, std::ios::in);
@@ -41,12 +41,15 @@ std::vector<dlib::matrix<double>> getCSV(const std::string &file,
       continue;
     }
     auto elements = split(line, delimiter);
-    std::cout << elements << std::endl;
     dlib::matrix<double> line_data(1, elements.size());
-    std::for_each(
-        elements.cbegin(), elements.cend(),
-        [i = 0, &line_data](auto &e) mutable { line_data(0, i) = stod(e); });
-    // std::cout << line_data << std::endl;
+    dlib::set_all_elements(line_data, 0);
+    std::for_each(elements.cbegin(), elements.cend(),
+                  [i = 0, &line_data](auto &e) mutable {
+                    line_data(0, i) = stod(e);
+                    std::cout << e << " to " << line_data(i) << std::endl;
+                  });
+    std::cout << std::endl;
+    std::cout << line_data << std::endl << std::endl;
     data.push_back(line_data);
   }
   std::cout << "Opened CSV file with " << data.size() << " lines." << std::endl;
@@ -54,15 +57,6 @@ std::vector<dlib::matrix<double>> getCSV(const std::string &file,
 }
 
 int main(int argc, char *argv[]) {
-
-  // Loads csv file
-  getCSV(argv[1], ',');
-
-  // Training data
-  //  dlib::matrix<double> x_train(100, 13);
-
-  // std::cout << x_train << std::endl;
-
-  // Defines network
+  getCSV(argv[1]);
   return 0;
 }
