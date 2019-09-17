@@ -14,14 +14,15 @@ using mlpack::ann::MeanSquaredError;
 using mlpack::ann::ReLULayer;
 using mlpack::ann::RNN;
 using mlpack::ann::SigmoidLayer;
+using mlpack::ann::TanHLayer;
 using mlpack::optimization::Adam;
 using mlpack::optimization::RMSProp;
 
-std::tuple<arma::mat, arma::mat> getTrainingData(double i_max = 100000,
+std::tuple<arma::mat, arma::mat> getTrainingData(double i_max = 1000000,
                                                  double x_min = -M_PI,
                                                  double x_max = M_PI) {
-  arma::mat x(i_max, 1);
-  arma::mat y(i_max, 1);
+  arma::mat x(1, i_max);
+  arma::mat y(1, i_max);
 
   size_t i = 0;
   while (i < i_max) {
@@ -61,20 +62,14 @@ int main(int argc, char *argv[]) {
   arma::mat train_y;
   ShuffleData(train_x_original, train_y_original, train_x, train_y);
 
-  arma::cube c;
-
   FFN<MeanSquaredError<>> model;
   model.Add<Linear<>>(1, 10);
   model.Add<ReLULayer<>>();
-  model.Add<Linear<>>(100, 100);
+  model.Add<Linear<>>(10, 100);
   model.Add<ReLULayer<>>();
-  model.Add<Linear<>>(10, 10);
-  model.Add<ReLULayer<>>();
-  model.Add<Linear<>>(10, 1);
+  model.Add<Linear<>>(100, 1);
+  model.Add<TanHLayer<>>();
   model.ResetParameters();
-
-  arma::mat test_x(1, 1);
-  arma::mat test_y(1, 1);
   RMSProp opt(0.01, 32, 0.99, 1e-8, std::stod(argv[1]), 1e-5, false);
   model.Train(train_x, train_y, opt);
 
@@ -82,8 +77,23 @@ int main(int argc, char *argv[]) {
   arma::mat assignments(train_x.size(), 1);
   std::cout << "Predicting..." << std::endl;
   model.Predict(train_x, assignments);
-  std::cout << "x: " << train_x.head_rows(10) << std::endl;
-  std::cout << "f(x): " << assignments.head_rows(10) << std::endl;
+  std::cout << "x: " << train_x.head_cols(10) << std::endl;
+  std::cout << "f(x): " << assignments.head_cols(10) << std::endl;
+  auto target_labels =
+      train_x.for_each([](arma::mat::elem_type &v) { v = std::cos(v); });
+  std::cout << "target f(x): " << target_labels.head_cols(10) << std::endl;
+
+  arma::mat test_x(1, 5);
+  test_x(0) = 0;
+  test_x(1) = M_PI;
+  test_x(2) = M_PI / 2;
+  test_x(3) = M_PI / 4;
+  test_x(4) = 0.6166;
+  arma::mat test_y;
+  model.Predict(test_x, test_y);
+  std::cout << "predicted: " << test_y
+            << "real: " << test_x.for_each([](auto &v) { v = std::cos(v); })
+            << std::endl;
 
   return 0;
 }
