@@ -1,99 +1,90 @@
-#include <cmath>
-#include <mlpack/core.hpp>
-#include <mlpack/core/optimizers/adam/adam.hpp>
-#include <mlpack/core/optimizers/rmsprop/rmsprop.hpp>
-#include <mlpack/methods/ann/ffn.hpp>
-#include <mlpack/methods/ann/loss_functions/mean_squared_error.hpp>
-#include <mlpack/methods/ann/rnn.hpp>
+#include <iostream>
+#include <torch/torch.h>
+#include <vector>
 
-using mlpack::ann::Dropout;
-using mlpack::ann::FFN;
-using mlpack::ann::Linear;
-using mlpack::ann::LSTM;
-using mlpack::ann::MeanSquaredError;
-using mlpack::ann::ReLULayer;
-using mlpack::ann::RNN;
-using mlpack::ann::SigmoidLayer;
-using mlpack::ann::TanHLayer;
-using mlpack::optimization::Adam;
-using mlpack::optimization::RMSProp;
+struct BLSTM_Model : torch::nn::Module {
+  torch::nn::LSTM lstm{nullptr};
+  torch::nn::LSTM reverse_lstm{nullptr};
+  torch::nn::Linear linear{nullptr};
 
-std::tuple<arma::mat, arma::mat> getTrainingData(double i_max = 1000000,
-                                                 double x_min = -M_PI,
-                                                 double x_max = M_PI) {
-  arma::mat x(1, i_max);
-  arma::mat y(1, i_max);
-
-  size_t i = 0;
-  while (i < i_max) {
-    x.at(i) = x_min + (x_max - x_min) * i / i_max;
-    y.at(i) = std::cos(x.at(i));
-    i++;
+  BLSTM_Model(uint64_t layers, uint64_t hidden, uint64_t inputs,
+              uint64_t outputs, uint64_t batch, uint64_t directions)
+      : hidden_(hidden), batch_(batch), directions_(directions) {
+    lstm = register_module(
+        "lstm",
+        torch::nn::LSTM(torch::nn::LSTMOptions(inputs, hidden).layers(layers)));
+    reverse_lstm = register_module(
+        "rlstm",
+        torch::nn::LSTM(torch::nn::LSTMOptions(inputs, hidden).layers(layers)));
+    linear = register_module("linear",
+                             torch::nn::Linear(hidden * directions, outputs));
   }
 
-  return std::make_tuple(x, y);
+  torch::Tensor forward(torch::Tensor x) {
+    // Reverse and feed into LSTM + Reversed LSTM
+    auto lstm1 = lstm->forward(x.view({x.size(0), batch_, -1}));
+    //[sequence,batch,FEATURE]
+    auto lstm2 =
+        reverse_lstm->forward(torch::flip(x, 0).view({x.size(0), batch_, -1}));
+    // Reverse Output from Reversed LSTM + Combine Outputs into one Tensor
+    auto cat = torch::empty({directions_, batch_, x.size(0), hidden_});
+    //[directions,batch,sequence,FEATURE]
+    cat[0] = lstm1.output.view({batch_, x.size(0), hidden_});
+    cat[1] = torch::flip(lstm2.output.view({batch_, x.size(0), hidden_}), 1);
+    // Feed into Linear Layer
+    auto out = torch::sigmoid(
+        linear->forward(cat.view({batch_, x.size(0), hidden_ * directions_})));
+    //[batch,sequence,FEATURE]
+    return out;
+  }
+
+private:
+  long batch_{1};
+  long directions_{1};
+  long hidden_{1};
 };
 
-using mlpack::math::ShuffleData;
+int main() {
+  // Configurations
+  static const int inputs = 1;
+  static const int sequence = 3;
+  static const int batch = 1;
+  static const int layers = 3;
+  static const int hidden = 2;
+  static const int outputs = 1;
+  static const int directions = 2;
 
-int main(int argc, char *argv[]) {
-
-  /*
-  const size_t rho = 50;
-  RNN<MeanSquaredError<>> model(rho);
-  model.Add<LSTM<>>(1, 50, rho);
-  model.Add<Dropout<>>(0.2);
-  model.Add<LSTM<>>(50, 100, rho);
-  model.Add<Dropout<>>(0.2);
-  model.Add<Linear<>>(100, 1);
-  model.Train(arma::cube predictors, arma::cube responses,
-              OptimizerType & optimizer);
-  */
-
-  arma::mat train_x_original;
-  arma::mat train_y_original;
-
-  std::tie(train_x_original, train_y_original) = getTrainingData();
-  std::cout << "training data size: " << train_x_original.size() << std::endl;
-  // std::cout << "training x: " << std::endl << train_x_original << std::endl;
-  // std::cout << "training y: " << std::endl << train_y_original << std::endl;
-
-  arma::mat train_x;
-  arma::mat train_y;
-  ShuffleData(train_x_original, train_y_original, train_x, train_y);
-
-  FFN<MeanSquaredError<>> model;
-  model.Add<Linear<>>(1, 10);
-  model.Add<ReLULayer<>>();
-  model.Add<Linear<>>(10, 100);
-  model.Add<ReLULayer<>>();
-  model.Add<Linear<>>(100, 1);
-  model.Add<TanHLayer<>>();
-  model.ResetParameters();
-  RMSProp opt(0.01, 32, 0.99, 1e-8, std::stod(argv[1]), 1e-5, false);
-  model.Train(train_x, train_y, opt);
-
-  size_t i = 0;
-  arma::mat assignments(train_x.size(), 1);
-  std::cout << "Predicting..." << std::endl;
-  model.Predict(train_x, assignments);
-  std::cout << "x: " << train_x.head_cols(10) << std::endl;
-  std::cout << "f(x): " << assignments.head_cols(10) << std::endl;
-  auto target_labels =
-      train_x.for_each([](arma::mat::elem_type &v) { v = std::cos(v); });
-  std::cout << "target f(x): " << target_labels.head_cols(10) << std::endl;
-
-  arma::mat test_x(1, 5);
-  test_x(0) = 0;
-  test_x(1) = M_PI;
-  test_x(2) = M_PI / 2;
-  test_x(3) = M_PI / 4;
-  test_x(4) = 0.6166;
-  arma::mat test_y;
-  model.Predict(test_x, test_y);
-  std::cout << "predicted: " << test_y
-            << "real: " << test_x.for_each([](auto &v) { v = std::cos(v); })
-            << std::endl;
-
-  return 0;
+  // Input: 0.1, 0.2, 0.3 -> Expected Output: 0.4, 0.5, 0.6
+  BLSTM_Model model =
+      BLSTM_Model(layers, hidden, inputs, outputs, batch, directions);
+  torch::optim::Adam optimizer(model.parameters(),
+                               torch::optim::AdamOptions(0.0001));
+  // Input
+  torch::Tensor input = torch::empty({sequence, inputs});
+  auto input_acc = input.accessor<float, 2>();
+  size_t count = 0;
+  for (float i = 0.1; i < 0.4; i += 0.1) {
+    input_acc[count][0] = i;
+    count++;
+  }
+  // Target
+  torch::Tensor target = torch::empty({sequence, outputs});
+  auto target_acc = target.accessor<float, 2>();
+  count = 0;
+  for (float i = 0.4; i < 0.7; i += 0.1) {
+    target_acc[count][0] = i;
+    count++;
+  }
+  // Train
+  for (size_t i = 0; i < 6000; i++) {
+    torch::Tensor output = model.forward(input);
+    auto loss = torch::mse_loss(output.view({sequence, outputs}), target);
+    std::cout << "Loss " << i << " : " << loss.item<float>() << std::endl;
+    loss.backward();
+    optimizer.step();
+  }
+  // Test: Response should be about (0.4, 0.5, 0.6)
+  torch::Tensor output = model.forward(input);
+  std::cout << output << std::endl;
+  return EXIT_SUCCESS;
 }
